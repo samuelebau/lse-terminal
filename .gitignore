@@ -30,3 +30,19 @@ lse_terminal/ui/static/assets/research/
 .wvenv/
 desktop/build-*.log
 desktop/*.log
+
+# ── Devbox (platforms/lse-terminal, TradingManager) ─────────────────────────
+# Dati utente locali (gruppo B): la cartella workspace/config e' lo stato
+# completo dell'app (key LSE, workspace, notebook, dashboard, chat, import,
+# adapter custom): le cartelle si tengono (gitkeep), i contenuti si ignorano.
+/workspace/config/*
+!/workspace/config/.gitkeep
+/workspace/download/*
+!/workspace/download/.gitkeep
+/workspace/output/*
+!/workspace/output/.gitkeep
+/workspace/import/*
+!/workspace/import/.gitkeep
+
+# Configurazione locale della devbox (se copiata da docker/.env.example).
+/docker/.env

@@ -1,0 +1,20 @@
+# Build context = platform (come le altre devbox del monorepo).
+# L'immagine serve solo a far girare l'engine: sorgente e dati utente
+# arrivano bind-mountati dal compose.
+.git
+.github
+.gitignore
+.dockerignore
+desktop/
+frontend/node_modules/
+tests/
+data/
+worktrees/
+.venv/
+.wvenv/
+workspace/
+docker/.env
+*.log
+Makefile
+DEVBOX.md
+docker/README.md

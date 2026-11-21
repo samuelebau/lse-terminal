@@ -1,0 +1,41 @@
+# Compose della devbox "LSE Terminal" (DEV: engine FastAPI + UI statica).
+# App: `lset` dal sorgente bind-mountato, in ascolto su 127.0.0.1:LSET_PORT.
+# Nessun DB: tutto lo stato dell'app sta su file in LSE_TERMINAL_CONFIG_DIR
+# (bind-mountata da workspace/config, gruppo B). Project "tm_lse_terminal".
+name: tm_lse_terminal
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: tm_lse_terminal:latest
+    container_name: tm_lse_terminal
+    # network_mode: host come le altre devbox (VPN su questo host). lset resta
+    # in ascolto su 127.0.0.1: l'engine porta la API key LSE e non esporsi
+    # oltre la macchina e' una scelta esplicita dell'app (vedi cli.py).
+    network_mode: host
+    environment:
+      LSET_PORT: "${APP_PORT:-7787}"
+      LSET_HOST: "${APP_HOST:-127.0.0.1}"
+      LSE_TERMINAL_CONFIG_DIR: /home/lse/.config/lse-terminal
+    volumes:
+      # Sorgente bind-mountato (dev): l'engine esegue il codice dell'host.
+      # Le modifiche Python richiedono `make restart`; l'UI statica si
+      # auto-ricarica da sola (poll di /api/health -> ui_version).
+      - ..:/app
+      # Volume anonimo: preserva il .venv dell'immagine dal bind-mount del
+      # sorgente (come /app/node_modules nella devbox tradenza).
+      - /app/.venv
+      # Stato utente (gruppo B): key LSE, workspace, notebook, dashboard,
+      # chat dell'assistente, import, adapter broker custom.
+      - ../workspace/config:/home/lse/.config/lse-terminal
+      # Area scratch utente (gruppo B), montata anche dentro il container.
+      - ../workspace:/home/lse/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${APP_PORT:-7787}/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
