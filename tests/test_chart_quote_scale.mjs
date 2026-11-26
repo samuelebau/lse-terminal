@@ -7,13 +7,14 @@
 // The rule: a declared instrument's chart is given the quote's max(bid, ask)
 // as the size its places are chosen by, so both choose by one size; with no
 // quote held (the page keeps the last quote, so this is only before the first
-// tick), each label by the value. The shipped bundle's formatter rF and axis
-// scale __lseAxisScale, and the page's fmtPx / quoteScale, are cut out and run.
+// tick), each label by the value. The shipped bundle's formatter and axis
+// scale (through its globalThis.__lsePriceFmt seam, tests/chart_bundle.mjs),
+// and the page's fmtPx / quoteScale, are run.
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import { bundle, shipped } from './chart_bundle.mjs';
 
-const bundle = fs.readFileSync(new URL('../lse_terminal/ui/static/chart/chart.js', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('../lse_terminal/ui/static/app.js', import.meta.url), 'utf8');
 const prochart = fs.readFileSync(new URL('../frontend/src/components/chart/ProChart.tsx', import.meta.url), 'utf8');
 
@@ -31,27 +32,26 @@ function page() {
   vm.runInContext(fmtLine + '\n' + ['fmtPx', 'srcDigits', 'quoteScale', 'fmtQuote'].map(cutApp).join('\n'), p);
   return p;
 }
+// the shipped bundle's own formatter and registry, by their seam
 function chart() {
-  const from = bundle.indexOf('let __lsePxDigits=');
-  const to = bundle.indexOf('const sF=', bundle.indexOf('function iF(', from));
-  const c = { Object, Number, Map, Math, String, isFinite };
-  vm.createContext(c);
-  vm.runInContext(bundle.slice(from, to) + ';globalThis.rF=rF;globalThis.set=__lseSetPxDigits;globalThis.axis=__lseAxisScale;', c);
-  return c;
+  return shipped();
 }
 const places = (s) => { const m = String(s).match(/\.(\d+)$/); return m ? m[1].length : 0; };
 
 // ── 1. the wiring: the chart's label scale is the quote's max(bid, ask) ──────
 await test('1. the bundle chooses the chart\'s places from the quote, not the axis', () => {
-  // the draw sets __lseAx.current (the size rF reads for every label) from the
-  // chart's quote props (brokerBid:D, brokerAsk:H), max of the finite sides
-  assert.ok(!bundle.includes('__lseAx.current=__lseAxisScale('), 'the axis is no longer the chart\'s label size');
-  assert.match(bundle, /__lseAx\.current=\(\(\)=>\{const \w+=\[D,H\]\.map\(Number\)\.filter\(\w+=>isFinite\(\w+\)&&\w+!==0\)\.map\(Math\.abs\);return \w+\.length\?Math\.max\(\.\.\.\w+\):void 0\}\)\(\)/,
+  // the draw sets the label scale (what the formatter reads for every label)
+  // from the chart's quote props, max of the finite sides; structure and
+  // property names survive minification, the identifiers are [\w$]+
+  assert.match(bundle, /\.current=\(\(\)=>\{const [\w$]+=\[[^\]]*\]\.map\(Number\)\.filter\([\w$]+=>isFinite\([\w$]+\)&&[\w$]+!==0\)\.map\(Math\.abs\);return [\w$]+\.length\?Math\.max\(\.\.\.[\w$]+\):void 0\}\)\(\)/,
                'the bundle sizes by the quote\'s max(bid, ask)');
-  // rF still reads that size (unchanged), and __lseAxisScale still exists for
-  // the other charts (the grid, the backtest)
-  assert.match(bundle, /=>rF\(\w+,t,__lsePs,__lseAx\.current\)/, 'rF reads the size');
-  assert.match(bundle, /function __lseAxisScale\(/, '__lseAxisScale stays for the other charts');
+  assert.ok(!/\.current=[\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\([\w$]+\),\d+,\d+\)/.test(bundle),
+            'the axis is no longer the chart\'s label size');
+  // the formatter still reads that scale (unchanged), and priceAxisScale
+  // still ships for the other charts (the grid, the backtest)
+  assert.match(bundle, /[\w$]+=[\w$]+\.useCallback\([\w$]+=>[\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\.current\),\[[\w$]+,[\w$]+,[\w$]+\(\)\]\)/,
+               'the formatter reads the size');
+  assert.equal(typeof chart().axis, 'function', 'priceAxisScale stays for the other charts');
 });
 await test('2. ProChart.tsx says the same', () => {
   assert.ok(!prochart.includes('priceLabelScaleRef.current = priceAxisScale('), 'the axis is no longer ProChart\'s label size');

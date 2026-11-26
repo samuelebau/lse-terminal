@@ -213,3 +213,17 @@ export function calculatePriceAxisWidth(
   // Tablet
   return Math.max(36, baseWidth);
 }
+
+// A seam for the pinned tests, not the app: tests/chart_bundle.mjs executes
+// the SHIPPED chart bundle in Node and drives the price machinery above
+// through this handle. Property names survive minification, so the tests keep
+// driving the shipped artifact however it is rebuilt — the __lseSetPxDigits &
+// co. names were this same seam, patched by hand into the minified bundle
+// while the bundle could not be rebuilt; now that it is a pure build product
+// again (see tests/test_chart_price_digits.mjs) the seam lives in the source
+// it is built from, alongside the functions it hands out.
+const __lsePriceFmt = {
+  setPriceDigits, priceDigitsVersion, formatPriceForSymbol,
+  orderFormPrice, priceAxisScale, calculatePriceAxisWidth,
+};
+(globalThis as { __lsePriceFmt?: typeof __lsePriceFmt }).__lsePriceFmt = __lsePriceFmt;

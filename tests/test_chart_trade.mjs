@@ -86,13 +86,20 @@ await test('4. no account, or the ticket hidden: trading is not available', () =
 
 // ── the bundle and its source: the menu gates its rows and prices the form ──
 await test('5. the menu offers its order rows only when the chart shows the instrument', () => {
-  // the bundle: the trade block is gated on available AND a bare-symbol match of
-  // the chart's symbol (e) to the instrument the order goes to (Ht.instrument)
-  assert.match(bundle, /available\)&&!!\w+\.instrument&&String\(e\)\.replace\(\/\[\^A-Z0-9\]\/gi,""\)\.toUpperCase\(\)===String\(\w+\.instrument\)\.replace/,
-               'the bundle gates the trade block on a bare-symbol match');
-  // the market rows and the form header name the instrument the order goes to
-  assert.ok(!bundle.includes('${wi}${Ht.symbol} at market'), 'the market rows no longer name the chart symbol');
-  assert.match(bundle, /\$\{wi\}\$\{Ht\.instrument\} at market/, 'the market rows name the instrument');
+  // the bundle: the trade blocks are gated on available AND a bare-symbol
+  // match of the chart's symbol to the instrument the order goes to — the
+  // bareMatch helper of mount.tsx, whose comparison is pinned by shape (regex
+  // literals and property names survive minification; identifiers are [\w$]+)
+  assert.ok([...bundle.matchAll(/available\)?&&[\w$]+\([\w$]+,[\w$]*(?:\.[\w$]+)*?\.instrument[,)]/g)].length >= 2,
+             'the bundle gates both trade blocks on a bare-symbol match');
+  assert.match(bundle, /String\([\w$]+\)\.replace\(\/\[\^A-Z0-9\]\/gi,""\)\.toUpperCase\(\)===String\([\w$]+\)\.replace\(\/\[\^A-Z0-9\]\/gi,""\)\.toUpperCase\(\)/,
+               'the match strips both sides to bare letters');
+  // the market rows name the instrument the order goes to — every one of
+  // them, never the chart's symbol
+  const rows = [...bundle.matchAll(/\$\{[\w$]+\}\$\{[^}]+\} at market/g)];
+  assert.ok(rows.length >= 2, 'the market rows exist');
+  for (const m of rows) assert.match(m[0], /\$\{[\w$]+\}\$\{[\w$]+\.instrument\}/,
+    `the market rows name the instrument: ${m[0]}`);
   // the source (mount.tsx) says the same: a bareMatch helper gates the block
   assert.match(mount, /const bareMatch = /, 'mount.tsx defines a bare-symbol match');
   assert.match(mount, /ctxMenu\.trade\?\.available && bareMatch\(symbol, ctxMenu\.trade\.instrument\) &&/,
@@ -102,10 +109,10 @@ await test('5. the menu offers its order rows only when the chart shows the inst
 await test('6. the form\'s price is at the instrument\'s places, snapped to its tick', () => {
   // the bundle's prefill: the ticket's digits and tick when it declares them,
   // the chart source's (orderFormPrice) only when it does not
-  assert.ok(!bundle.includes('Z(ns!=null?__lseOrderPrice(ns,e,n):"")'), 'the old prefill is gone');
-  assert.match(bundle, /Ht\.tick>0\?Math\.round\(ns\/Ht\.tick\)\*Ht\.tick:ns\)\.toFixed\(Ht\.digits\)/,
+  assert.match(bundle, /[\w$]+\.tick>0\?Math\.round\([\w$]+\/[\w$]+\.tick\)\*[\w$]+\.tick:[\w$]+\)\.toFixed\([\w$]+\.digits\)/,
                'the bundle snaps to the tick and fills at the declared places');
-  assert.match(bundle, /:__lseOrderPrice\(ns,e,n\)/, 'the chart source is the fallback');
+  assert.equal([...bundle.matchAll(/:[\w$]+\([\w$]+,[\w$]+,[\w$]+\):""\)/g)].length, 1,
+               'the chart source is the one three-argument fallback');
   // the source says the same
   assert.match(mount, /t\.tick && t\.tick > 0 \? Math\.round\(p \/ t\.tick\) \* t\.tick : p\)\.toFixed\(t\.digits\)/,
                'mount.tsx snaps to the tick and fills at the declared places');

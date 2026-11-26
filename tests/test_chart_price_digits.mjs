@@ -7,8 +7,9 @@
 // its source declares for each instrument (a broker's catalog), and it prints
 // those, as a maximum.
 //
-// What is pinned, on the SHIPPED bundle (its own code cut out and run) and on
-// the page:
+// What is pinned, on the SHIPPED bundle — executed whole in Node and driven
+// through the stable globalThis.__lsePriceFmt seam, see tests/chart_bundle.mjs
+// — and on the page:
 //   1. a declared precision is a maximum. Where a price of its size can use
 //      it (about seven significant figures) it is printed in full, so every
 //      label of an instrument carries it alike (a pair's 1.27100); a venue
@@ -40,8 +41,8 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import { bundle, shipped } from './chart_bundle.mjs';
 
-const bundle = fs.readFileSync(new URL('../lse_terminal/ui/static/chart/chart.js', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('../lse_terminal/ui/static/app.js', import.meta.url), 'utf8');
 const utils = fs.readFileSync(new URL('../frontend/src/lib/utils.ts', import.meta.url), 'utf8');
 const mount = fs.readFileSync(new URL('../frontend/src/mount.tsx', import.meta.url), 'utf8');
@@ -50,20 +51,9 @@ const btchart = fs.readFileSync(new URL('../frontend/src/components/chart/BTChar
 const grid = fs.readFileSync(new URL('../frontend/src/components/chart/TerminalMultiGrid.tsx', import.meta.url), 'utf8');
 
 // ── 1-3. the shipped formatter, and the source it is built from ────────────
-// The same cases run on both: the bundle's own code, and utils.ts with its
-// type annotations taken out (there is no TypeScript compiler here, and the
-// bundle cannot be rebuilt), so the two are pinned alike by what they print.
-const from = bundle.indexOf('let __lsePxDigits=');
-assert.ok(from >= 0, 'the bundle keeps the declared digits beside its formatter');
-const to = bundle.indexOf('const sF=', bundle.indexOf('function iF(', from));
-function shipped() {
-  const c = { Object, Number, Map, Math, String, isFinite };
-  vm.createContext(c);
-  vm.runInContext(bundle.slice(from, to) + ';globalThis.fmt=rF;globalThis.width=iF;'
-    + 'globalThis.set=__lseSetPxDigits;globalThis.ver=__lsePxDigitsVersion;'
-    + 'globalThis.axis=typeof __lseAxisScale==="function"?__lseAxisScale:null;', c);
-  return c;
-}
+// The same cases run on both: the shipped bundle's own code, reached through
+// its __lsePriceFmt seam, and utils.ts with its annotations taken out, so the
+// two are pinned alike by what they print.
 // utils.ts's registry and formatter, its annotations removed
 function source() {
   const begin = utils.indexOf('const declaredDigits = ');
@@ -231,51 +221,67 @@ formatterCases(source());
 }
 
 // ── 4. the bundle's mount and update, the charts that read them, the memos ──
+// The bundle is a pure build product of the sources, so these pins lean on
+// what minification cannot touch — string literals, property names, and
+// structure — and on the seam the tests execute it through; every minified
+// identifier below is matched as [\w$]+ (minifiers may mint $-names).
 {
-  const yj = bundle.slice(bundle.indexOf('function Yj(n){'), bundle.indexOf('const qj={'));
-  assert.match(yj, /"priceDigits"in n&&\(__lseSetPxDigits\(n\.priceDigits,"priceSource"in n\?n\.priceSource:n\.provider\),delete e\.priceDigits\),delete e\.priceSource,e\}/);
-  assert.match(bundle, /const qj=\{async mount\(n,e=\{\}\)\{wA=\{\.\.\.wA,\.\.\.Yj\(e\)\}/);
-  assert.match(bundle, /update\(n\)\{wA=\{\.\.\.wA,\.\.\.Yj\(n\)\},AK\(\)\}/);
-  // the formatter reads a source's own; the axis width passes it on
-  assert.match(bundle, /function __lseSetPxDigits\(n,s\)\{/);
-  assert.match(bundle, /function rF\(n,e,s,S\)\{/);
-  assert.match(bundle, /function iF\(n,e,t,r,S\)\{const i=t\|\|100,s=typeof window<"u"&&window\.innerWidth>=1024,l=rF\(i,e,S\)\.length/);
-  // ProChart takes the source it charts, and its two memos read and follow it
-  const kf = bundle.slice(bundle.indexOf('const KF=({candles:n,'), bundle.indexOf('})=>{', bundle.indexOf('const KF=({candles:n,')));
-  assert.match(kf, /,priceSource:__lsePs\b/);
-  assert.equal([...bundle.matchAll(/w\.useMemo\(\(\)=>iF\([^)]*,__lsePs\),\[[^\]]*,__lsePs,__lsePxDigitsVersion\(\)\]\)/g)].length, 1);
-  // the shell's chart, its grid's panels and the panes say which source they chart
-  const tc = bundle.slice(bundle.indexOf('function mwt({provider:n,symbol:e,'), bundle.indexOf('function vwt('));
-  assert.match(tc, /u\.jsx\(KF,\{candles:r,symbol:e,priceSource:n,/);
-  assert.match(tc, /u\.jsx\(S7e,\{layout:ge,syncSettings:ne,pair:e,timeframe:t,colors:Nt,quote:o,priceSource:n\}\)/);
-  assert.match(bundle, /function S7e\(\{layout:n,syncSettings:e,pair:t,timeframe:r,colors:i,quote:s,priceSource:__lsePs\}\)/);
-  assert.match(bundle, /onViewportTimeChange:y,quote:s,priceSource:__lsePs\},S\)/);
-  assert.match(bundle, /function w7e\(\{symbol:n,timeframe:e,colors:t,active:r,onActivate:i,syncedCrosshairTime:s,onCrosshairMove:a,syncedViewportTime:l,onViewportTimeChange:o,quote:c,priceSource:__lsePs\}\)/);
-  assert.match(bundle, /u\.jsx\(KF,\{candles:d,symbol:n,priceSource:__lsePs,timeframe:e,/);
-  assert.match(bundle, /function vwt\(\{symbol:n,timeframe:e,candles:t,quote:r,provider:__lsePs\}\)/);
-  assert.match(bundle, /u\.jsx\(KF,\{candles:t,symbol:n,priceSource:__lsePs,timeframe:e,/);
+  // the mount/update entries thread every prop through the one transform
+  assert.match(bundle, /const [\w$]+=\{async mount\([\w$]+,[\w$]+=\{\}\)\{[\w$]+=\{\.\.\.[\w$]+,\.\.\.[\w$]+\([\w$]+\)\}/);
+  assert.match(bundle, /update\([\w$]+\)\{[\w$]+=\{\.\.\.[\w$]+,\.\.\.[\w$]+\([\w$]+\)\},[\w$]+\(\)\}/);
+  // the transform itself: the declared digits are read, named by the source
+  // they came from (the prop, else the provider), and kept out of the props
+  // any chart receives
+  assert.match(bundle, /"priceDigits"in [\w$]+&&\([\w$]+\([\w$]+\.priceDigits,"priceSource"in [\w$]+\?[\w$]+\.priceSource:[\w$]+\.provider\),delete [\w$]+\.priceDigits\),delete [\w$]+\.priceSource,[\w$]+\}/);
+  // the registry ships whole: the stable seam hands out every price function
+  // of utils.ts, and the axis width's desktop branch reads the window
+  assert.match(bundle, /[\w$]+=\{setPriceDigits:[\w$]+,priceDigitsVersion:[\w$]+,formatPriceForSymbol:[\w$]+,orderFormPrice:[\w$]+,priceAxisScale:[\w$]+,calculatePriceAxisWidth:[\w$]+\};globalThis\.__lsePriceFmt=[\w$]+/);
+  assert.match(bundle, /typeof window<"u"&&window\.innerWidth>=1024/);
+  // ProChart takes the source it charts: its props destructure priceSource,
+  // and its two memos read it and follow the digits' version
+  assert.match(bundle, /priceSource:[\w$]+\}\)=>\{/);
+  assert.match(bundle, /[\w$]+\.useMemo\(\(\)=>[\w$]+\([\w$]+,[\w$]+,[\w$]+\|\|100,[\w$]+,[\w$]+\),\[[\w$]+(?:,[\w$]+){5},[\w$]+\(\)\]\)/,
+               'the axis width memo re-runs when the declarations change');
+  const cb = bundle.match(/[\w$]+=[\w$]+\.useCallback\([\w$]+=>[\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\.current\),\[[\w$]+,[\w$]+,[\w$]+\(\)\]\)/);
+  assert.ok(cb, 'the label formatter memo follows the source, the scale and the version');
+  assert.equal([...bundle.matchAll(/[\w$]+=[\w$]+\.useCallback\([\w$]+=>[\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\.current\),\[[\w$]+,[\w$]+,[\w$]+\(\)\]\)/g)].length, 1);
+  // the shell's chart, its grid's panels and the panes say which source they
+  // chart: the shell host takes a provider, the grid and the pane thread a
+  // priceSource, and every ProChart call site passes one
+  assert.match(bundle, /function [\w$]+\(\{provider:[\w$]+,symbol:[\w$]+,timeframe:[\w$]+,/);
+  assert.match(bundle, /u\.jsx\([\w$]+,\{candles:[\w$]+,symbol:[\w$]+,priceSource:[\w$]+,timeframe:[\w$]+/);
+  assert.match(bundle, /function [\w$]+\(\{layout:[\w$]+,syncSettings:[\w$]+,pair:[\w$]+,timeframe:[\w$]+,colors:[\w$]+,quote:[\w$]+,priceSource:[\w$]+\}\)/);
+  assert.match(bundle, /function [\w$]+\(\{symbol:[\w$]+,timeframe:[\w$]+,colors:[\w$]+,active:[\w$]+,onActivate:[\w$]+,syncedCrosshairTime:[\w$]+,onCrosshairMove:[\w$]+,syncedViewportTime:[\w$]+,onViewportTimeChange:[\w$]+,quote:[\w$]+,priceSource:[\w$]+\}\)/);
+  assert.match(bundle, /onViewportTimeChange:[\w$]+,quote:[\w$]+,priceSource:[\w$]+\},[\w$]\)\)/);
+  assert.match(bundle, /function [\w$]+\(\{symbol:[\w$]+,timeframe:[\w$]+,candles:[\w$]+,quote:[\w$]+,provider:[\w$]+\}\)/,
+               'the manual backtest host names the provider it replays');
   // 1b. ProChart chooses its places once a draw, from the quote's
-  // max(|bid|,|ask|) (brokerBid:D, brokerAsk:H), before any label is drawn, and
-  // its one formatter reads them; the label loop below still draws the gridlines
-  assert.match(bundle, /ni=w\.useRef\(null\),Br=w\.useRef\(0\),__lseAx=w\.useRef\(void 0\),/);
-  assert.match(bundle, /__lseAx\.current=\(\(\)=>\{const zs=\[D,H\]\.map\(Number\)\.filter\(zv=>isFinite\(zv\)&&zv!==0\)\.map\(Math\.abs\);return zs\.length\?Math\.max\(\.\.\.zs\):void 0\}\)\(\);j\.beginPath\(\);/);
-  assert.ok(!bundle.includes('__lseAx.current=__lseAxisScale('), 'the axis is no longer the chart\'s label size');
-  assert.equal([...bundle.matchAll(/w\.useCallback\((\w+)=>rF\(\1,t,__lsePs,__lseAx\.current\),\[t,__lsePs,__lsePxDigitsVersion\(\)\]\)/g)].length, 1);
+  // max(|bid|,|ask|), before any label is drawn, and its one formatter reads
+  // them; the label loop below still draws the gridlines
+  assert.match(bundle, /\.current=\(\(\)=>\{const [\w$]+=\[[^\]]*\]\.map\(Number\)\.filter\([\w$]+=>isFinite\([\w$]+\)&&[\w$]+!==0\)\.map\(Math\.abs\);return [\w$]+\.length\?Math\.max\(\.\.\.[\w$]+\):void 0\}\)\(\)/,
+               'the draw sizes every label by the quote\'s max(bid, ask)');
+  assert.ok(!/\.current=[\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\([\w$]+\),\d+,\d+\)/.test(bundle),
+            'the axis is no longer the chart\'s label size');
   {
-    // the formatter's first use after its definition is in the draw, after the places are chosen
-    const def = bundle.indexOf('cd=w.useCallback(ze=>rF(');
-    const draw = bundle.indexOf('__lseAx.current=(()=>{const zs=[D,H]');
-    const first = def + 30 + bundle.slice(def + 30).search(/[^\w.$]cd\(/);
+    // the formatter's first use after its definition is in the draw, after
+    // the places are chosen (its minified name comes from the memo above)
+    const name = cb[0].split('=')[0];
+    const def = cb.index;
+    const draw = bundle.indexOf('.current=(()=>{const');
+    const first = def + 30 + bundle.slice(def + 30).search(new RegExp(`[^\\w.$]${name}\\(`));
     assert.ok(def > 0 && draw > def && first > draw, 'the places are chosen before the first label of a draw');
     // the label loop still draws the gridlines over the same price geometry
     const loop = bundle.slice(draw, draw + 1000);
-    assert.match(loop, /for\(let Lt=xh;Lt<=Ca\.max;Lt\+=Nl\)\{const Ve=Xa\(Lt\);/);
+    assert.match(loop, /for\(let [\w$]+=[\w$]+;[\w$]+<=[\w$]+\.max;[\w$]+\+=[\w$]+\)\{const [\w$]+=[\w$]+\([\w$]+\);/);
   }
-  // the backtest's chart (BTChart) names no source, so it reads no declarations
-  assert.match(bundle, /la=w\.useMemo\(\(\)=>iF\(Vg,t,as\|\|100,F\),\[Vg,zp,t,as,F\]\)/);
-  assert.match(bundle, /Jo=w\.useCallback\(Et=>rF\(Et,t\),\[t\]\)/);
+  // the backtest's chart (BTChart) names no source, so it reads no
+  // declarations: its axis memo has no digits' version among its deps
+  assert.match(bundle, /[\w$]+\.useMemo\(\(\)=>[\w$]+\([\w$]+,[\w$]+,[\w$]+\|\|100,[\w$]+\),\[[\w$]+(?:,[\w$]+){4}\]\)/,
+               'the backtest\'s axis memo depends on no digits version');
   // nothing else formats a price without saying which source's it is
-  assert.equal([...bundle.matchAll(/=>rF\(\w+,t\)/g)].length, 1, 'only the backtest\'s chart calls rF with no source');
+  const fmtFn = cb[0].match(/=>([\w$]+)\(/)[1];
+  assert.equal([...bundle.matchAll(new RegExp(`=>${fmtFn}\\([\\w$]+,[\\w$]+\\)`, 'g'))].length, 1,
+               'only the backtest\'s chart formats a price with no source');
 }
 
 // ── 5. the source says the same ───────────────────────────────────────────

@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { page, test, done, src } from './ticket_page.mjs';
+import { bundle, shipped } from './chart_bundle.mjs';
 
-const bundle = fs.readFileSync(new URL('../lse_terminal/ui/static/chart/chart.js', import.meta.url), 'utf8');
 const mount = fs.readFileSync(new URL('../frontend/src/mount.tsx', import.meta.url), 'utf8');
 
 // the bridge's quickOrder entry, exactly as app.js writes it
@@ -47,15 +47,9 @@ await test('with no size from the caller the ticket\'s box is the size', async (
 // AUD_USD (five places) clicked at 0.694281 must not fill "0.694281", which
 // the broker's adapter refuses (more decimals than the instrument's 5).
 const utils = fs.readFileSync(new URL('../frontend/src/lib/utils.ts', import.meta.url), 'utf8');
+// the shipped bundle's own orderFormPrice, by its __lsePriceFmt seam
 function shippedFill() {
-  const from = bundle.indexOf('let __lsePxDigits=');
-  const to = bundle.indexOf('function rF(', from);
-  assert.ok(from >= 0 && to > from, 'the bundle keeps the declared digits beside its formatter');
-  const c = { Object, Number, Map, Math, String, isFinite };
-  vm.createContext(c);
-  vm.runInContext(bundle.slice(from, to) + ';globalThis.set=__lseSetPxDigits;'
-    + 'globalThis.fill=typeof __lseOrderPrice==="function"?__lseOrderPrice:null;', c);
-  return c;
+  return shipped();
 }
 function sourceFill() {
   const begin = utils.indexOf('const declaredDigits = ');
@@ -105,18 +99,19 @@ await test('the bundle and its source fall back to the chart\'s own source for t
   // The form is filled at the INSTRUMENT the order goes to (its places, its
   // tick: test_chart_trade). Where that instrument declares no places, the
   // clicked level is filled at the places the chart's source declares
-  // (__lseOrderPrice / orderFormPrice, from the chart's symbol and source), as
-  // before. The old magnitude-only prefill is gone.
-  assert.match(bundle, /:__lseOrderPrice\(ns,e,n\):""\)/, 'the bundle\'s fallback is the chart source');
-  assert.ok(!bundle.includes('String(+ns.toFixed(ns>=1e3?2:ns>=100?3:ns>=1?4:6))'), 'the old prefill is gone');
-  // in the bundle, the chart component's provider is `n` and its symbol `e`
-  assert.match(bundle, /function mwt\(\{provider:n,symbol:e,timeframe:t,/);
+  // (orderFormPrice, from the chart's symbol and source), as before. The
+  // old magnitude-only prefill is gone. Property names and structure
+  // survive minification; the identifiers are [\w$]+.
+  assert.equal([...bundle.matchAll(/:[\w$]+\([\w$]+,[\w$]+,[\w$]+\):""\)/g)].length, 1,
+               'the bundle\'s form fallback is the one three-argument price call');
+  assert.match(bundle, /function [\w$]+\(\{provider:[\w$]+,symbol:[\w$]+,timeframe:[\w$]+,/,
+               'the shell\'s chart host names the provider it charts');
   assert.match(mount, /: orderFormPrice\(p, symbol, provider\)\)\s*: ''\);/);
   assert.match(mount, /import \{ setPriceDigits, orderFormPrice \} from '@\/lib\/utils';/);
 });
 
 await test('the bundle and its source call the bridge with the form\'s size', () => {
-  assert.match(bundle, /\.quickOrder\)==null\|\|\w+\.call\(\w+,\w+\.side,\w+\.otype,\w+,\w+\)/,
+  assert.match(bundle, /\.quickOrder\)==null\|\|[\w$]+\.call\([\w$]+,[\w$]+\.side,[\w$]+\.otype,[\w$]+,[\w$]+\)/,
                'the shipped bundle\'s form Place passes four arguments');
   assert.match(mount, /__lseShell\?\.quickOrder\?\.\(ordForm\.side, ordForm\.otype, pv, qv\)/);
 });
